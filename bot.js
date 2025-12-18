@@ -1,7 +1,5 @@
 // ======================================================
-// SourSound — Sremote v1
-// Prefix: S
-// Controls: remote panel with buttons + selects (fine/coarse increments)
+// SourSound — Sremote v1.7.0
 // ======================================================
 
 require("dotenv").config();
@@ -35,12 +33,11 @@ const client = new Client({
 });
 
 // -------------------- State --------------------
-// per-guild player, ffmpeg child, settings, and remote message
-const players = new Map();          // guildId -> AudioPlayer
-const ffmpegProcs = new Map();     // guildId -> child_process
-const remoteMessages = new Map();  // guildId -> { channelId, messageId }
-const settings = new Map();        // guildId -> { type, lowpass, highpass, volume, preset }
-const presetIndex = new Map();     // for Snoisemenu navigation
+const players = new Map();         
+const ffmpegProcs = new Map();   
+const remoteMessages = new Map(); 
+const settings = new Map();        
+const presetIndex = new Map();   
 
 // -------------------- Presets --------------------
 const presets = [
@@ -107,7 +104,7 @@ function getSettings(guildId) {
 
 function clampVolume(v) {
     if (Number.isNaN(v)) return 0.4;
-    return Math.min(Math.max(v, 0.0), 1.0); // user chose option B: max 1.0
+    return Math.min(Math.max(v, 0.0), 1.0);
 }
 
 function clampFreq(f) {
@@ -115,34 +112,28 @@ function clampFreq(f) {
     return Math.max(1, Math.floor(f));
 }
 
-// kill existing ffmpeg child for guild (if any)
 function killFfmpeg(guildId) {
     const proc = ffmpegProcs.get(guildId);
     if (proc && !proc.killed) {
-        try { proc.kill("SIGKILL"); } catch (e) { /* ignore */ }
+        try { proc.kill("SIGKILL"); } catch (e) { }
     }
     ffmpegProcs.delete(guildId);
 }
 
-// Play current settings (stop previous ffmpeg, spawn new, play through player)
 function playCurrent(guildId, voiceChannel) {
     const s = getSettings(guildId);
 
-    // ensure valid
     s.volume = clampVolume(s.volume);
     s.lowpass = clampFreq(s.lowpass);
     s.highpass = clampFreq(s.highpass);
 
-    // build ffmpeg args
     const source = `anoisesrc=color=${s.type}:sample_rate=48000`;
     const filter = `lowpass=f=${s.lowpass},highpass=f=${s.highpass},volume=${s.volume}`;
 
-    // kill prior process
     killFfmpeg(guildId);
 
-    // spawn ffmpeg
     const proc = spawn(ffmpeg, [
-        "-re",        // <--- add this
+        "-re",        
         "-f", "lavfi",
         "-i", source,
         "-af", filter,
@@ -153,26 +144,21 @@ function playCurrent(guildId, voiceChannel) {
         "pipe:1"
     ], { windowsHide: true });
 
-    // save process
     ffmpegProcs.set(guildId, proc);
 
-    // ensure voice connection
     const connection = joinVoiceChannel({
         channelId: voiceChannel.id,
         guildId: voiceChannel.guild.id,
         adapterCreator: voiceChannel.guild.voiceAdapterCreator
     });
 
-    // get or create player
     let player = players.get(guildId);
     if (!player) {
         player = createAudioPlayer();
         players.set(guildId, player);
         connection.subscribe(player);
 
-        // optional: remove player on idle (keeps things tidy)
         player.on(AudioPlayerStatus.Idle, () => {
-            // leave idle — we keep player, but do nothing
         });
     }
 
@@ -183,7 +169,6 @@ function playCurrent(guildId, voiceChannel) {
     player.play(resource);
 }
 
-// Build the embed that shows current settings
 function buildRemoteEmbed(guildId) {
     const s = getSettings(guildId);
     const presetMeta = presets.find(p => p.id === s.preset) || null;
@@ -205,9 +190,7 @@ function buildRemoteEmbed(guildId) {
     return embed;
 }
 
-// Build component rows: preset select, type select, lowpass controls, highpass controls, volume controls, play/stop/leave
 function buildRemoteComponents(guildId) {
-    // ---- Row 1: Preset Select ----
     const presetOptions = presets.map(p => ({
         label: p.label,
         value: `preset:${p.id}`,
@@ -221,7 +204,6 @@ function buildRemoteComponents(guildId) {
             .addOptions(presetOptions)
     );
 
-    // ---- Row 2: Noise Type Select ----
     const typeRow = new ActionRowBuilder().addComponents(
         new StringSelectMenuBuilder()
             .setCustomId(`select:type:${guildId}`)
@@ -233,7 +215,6 @@ function buildRemoteComponents(guildId) {
             ])
     );
 
-    // ---- Row 3: Lowpass Controls ----
     const lowpassRow = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId(`lowpass:dec:coarse:${guildId}`).setLabel("-500").setStyle(ButtonStyle.Secondary),
         new ButtonBuilder().setCustomId(`lowpass:dec:fine:${guildId}`).setLabel("-100").setStyle(ButtonStyle.Secondary),
@@ -241,7 +222,6 @@ function buildRemoteComponents(guildId) {
         new ButtonBuilder().setCustomId(`lowpass:inc:coarse:${guildId}`).setLabel("+500").setStyle(ButtonStyle.Primary)
     );
 
-    // ---- Row 4: Highpass Controls ----
     const highpassRow = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId(`highpass:dec:coarse:${guildId}`).setLabel("-50").setStyle(ButtonStyle.Secondary),
         new ButtonBuilder().setCustomId(`highpass:dec:fine:${guildId}`).setLabel("-10").setStyle(ButtonStyle.Secondary),
@@ -249,7 +229,6 @@ function buildRemoteComponents(guildId) {
         new ButtonBuilder().setCustomId(`highpass:inc:coarse:${guildId}`).setLabel("+50").setStyle(ButtonStyle.Primary)
     );
 
-    // ---- Row 5: Volume + Controls ----
     const volumeControlRow = new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId(`volume:dec:coarse:${guildId}`).setLabel("-0.10").setStyle(ButtonStyle.Secondary),
         new ButtonBuilder().setCustomId(`volume:inc:coarse:${guildId}`).setLabel("+0.10").setStyle(ButtonStyle.Primary),
@@ -262,7 +241,6 @@ function buildRemoteComponents(guildId) {
 }
 
 
-// Send or edit the remote message for a guild
 async function sendOrUpdateRemote(msg) {
     const guildId = msg.guild.id;
     const channel = msg.channel;
@@ -281,17 +259,14 @@ async function sendOrUpdateRemote(msg) {
                 }
             }
         } catch (e) {
-            // fall through to re-send
         }
     }
 
-    // send new
     const sent = await channel.send({ embeds: [embed], components });
     remoteMessages.set(guildId, { channelId: channel.id, messageId: sent.id });
     return sent;
 }
 
-// -------------------- Snoises (keeps old menu behavior) --------------------
 function playFromPreset(preset, guildId, voiceChannel) {
     // apply preset settings and play
     const s = getSettings(guildId);
@@ -304,7 +279,6 @@ function playFromPreset(preset, guildId, voiceChannel) {
     playCurrent(guildId, voiceChannel);
 }
 
-// -------------------- Message Handler --------------------
 client.on("messageCreate", async (msg) => {
     if (!msg.content.startsWith(PREFIX)) return;
 
@@ -315,7 +289,7 @@ client.on("messageCreate", async (msg) => {
 
     const voiceChannel = msg.member?.voice?.channel;
 
-    // HELP
+    // HEP
     if (cmd === "help" || cmd === "shelp") {
         return msg.reply(`
 \`\`\`
@@ -336,7 +310,6 @@ Use Sremote for fine control (lowpass, highpass, volume, type).
         `);
     }
 
-    // Sstatus
     if (cmd === "status") {
         const s = getSettings(msg.guild.id);
         return msg.reply({
@@ -344,7 +317,6 @@ Use Sremote for fine control (lowpass, highpass, volume, type).
         });
     }
 
-    // Snoises reaction-based menu (keeps previous experience)
     if (cmd === "noises" || cmd === "noisemenu") {
         if (!voiceChannel) return msg.reply("Join a voice channel first.");
 
@@ -392,7 +364,6 @@ Use Sremote for fine control (lowpass, highpass, volume, type).
         return;
     }
 
-    // Splay <preset name>
     if (cmd === "play") {
         if (!voiceChannel) return msg.reply("Join a voice channel first.");
         const name = args.join(" ").toLowerCase();
@@ -402,18 +373,14 @@ Use Sremote for fine control (lowpass, highpass, volume, type).
         return msg.reply(`Now playing **${preset.label}**`);
     }
 
-    // Sremote
     if (cmd === "remote") {
         if (!voiceChannel) return msg.reply("Join a voice channel first.");
-        // ensure defaults exist
         const s = getSettings(msg.guild.id);
-        // set default preset id if preset missing
         if (!s.preset) s.preset = "smooth-brown";
         const msgRef = await sendOrUpdateRemote(msg);
         return;
     }
 
-    // Sstop
     if (cmd === "stop") {
         const player = players.get(msg.guild.id);
         if (player) player.stop();
@@ -421,7 +388,6 @@ Use Sremote for fine control (lowpass, highpass, volume, type).
         return msg.reply("Stopped playback.");
     }
 
-    // Sleave
     if (cmd === "leave") {
         const conn = getVoiceConnection(msg.guild.id);
         if (conn) conn.destroy();
@@ -431,28 +397,22 @@ Use Sremote for fine control (lowpass, highpass, volume, type).
 
 });
 
-// -------------------- Interaction Handler --------------------
 client.on("interactionCreate", async (interaction) => {
-    // only handle component interactions we created
     if (!interaction.isButton() && !interaction.isStringSelectMenu()) return;
 
-    const id = interaction.customId; // pattern like: lowpass:inc:fine:<guildId> or select:preset:<guildId>
+    const id = interaction.customId; 
 
-    // parse
     const parts = id.split(":");
-    // safety: ensure parts length
     if (parts.length < 3) return;
 
-    const action = parts[0]; // lowpass/highpass/volume/control/select
-    const sub = parts[1];    // inc/dec or preset/type or play/stop/leave
-    const rawmagnitude = parts[2];   // fine/coarse or the guildId if select:type...
-    const guildId = parts[3] || parts[2]; // some ids end with guildId, adapt parsing
+    const action = parts[0];
+    const sub = parts[1];   
+    const rawmagnitude = parts[2];  
+    const guildId = parts[3] || parts[2]; 
     
-    // handle selects differently (they include full customId like select:preset:gId and values)
     if (interaction.isStringSelectMenu()) {
-        // expected customId: select:preset:<guildId>  or select:type:<guildId>
         const cidParts = id.split(":");
-        const kind = cidParts[1]; // preset or type
+        const kind = cidParts[1]; 
         const gid = cidParts[2];
         if (!interaction.values || interaction.values.length === 0) {
             await interaction.reply({ content: "No selection.", ephemeral: true }).catch(()=>{});
@@ -472,7 +432,6 @@ client.on("interactionCreate", async (interaction) => {
                 await interaction.reply({ content: "Preset not found.", ephemeral: true }).catch(()=>{});
                 return;
             }
-            // apply preset to guild settings
             const s = getSettings(gid);
             s.type = preset.type;
             s.lowpass = preset.lowpass;
@@ -480,12 +439,10 @@ client.on("interactionCreate", async (interaction) => {
             s.volume = preset.volume;
             s.preset = preset.id;
 
-            // if user is in a VC, play/update
             const member = interaction.guild?.members?.cache?.get(interaction.user.id);
             const voiceChannel = member?.voice?.channel;
             if (voiceChannel) playCurrent(gid, voiceChannel);
 
-            // update embed in-place
             const remote = remoteMessages.get(gid);
             if (remote) {
                 const channelRef = await client.channels.fetch(remote.channelId).catch(()=>null);
@@ -503,7 +460,7 @@ client.on("interactionCreate", async (interaction) => {
 
         if (kind === "type") {
             const gid = cidParts[2];
-            const value = interaction.values[0]; // like type:brown
+            const value = interaction.values[0]; 
             if (!value.startsWith("type:")) {
                 await interaction.reply({ content: "Invalid type.", ephemeral: true }).catch(()=>{});
                 return;
@@ -534,16 +491,13 @@ client.on("interactionCreate", async (interaction) => {
     }
 
     // BUTTONS ----------------------------------------------------------------
-    // expected customId format: "<param>:<inc|dec>:<fine|coarse>:<guildId>" or "control:play:<guildId>"
     const parts2 = id.split(":");
-    // If custom id doesn't match expected pattern, ignore
+
     if (parts2.length < 3) {
         await interaction.reply({ content: "Invalid control.", ephemeral: true }).catch(()=>{});
         return;
     }
 
-    // Re-derive variables safely
-    // For control buttons: control:play:<guildId>
     if (parts2[0] === "control") {
         const op = parts2[1];
         const gid = parts2[2];
@@ -556,7 +510,6 @@ client.on("interactionCreate", async (interaction) => {
                 return;
             }
             playCurrent(gid, voiceChannel);
-            // update embed
             const remote = remoteMessages.get(gid);
             if (remote) {
                 const channelRef = await client.channels.fetch(remote.channelId).catch(()=>null);
@@ -588,8 +541,6 @@ client.on("interactionCreate", async (interaction) => {
         }
     }
 
-    // parameter change buttons
-    // param = lowpass | highpass | volume
     const param = parts2[0];
     const direction = parts2[1]; // inc / dec
     const magnitude = parts2[2]; // fine / coarse
@@ -614,15 +565,12 @@ client.on("interactionCreate", async (interaction) => {
         return;
     }
 
-    // mark preset as custom (user changed)
     s.preset = "custom";
 
-    // update audio if user in a voice channel
     const member = interaction.guild?.members?.cache?.get(interaction.user.id);
     const voiceChannel = member?.voice?.channel;
     if (voiceChannel) playCurrent(gid, voiceChannel);
 
-    // update remote embed message
     const remote = remoteMessages.get(gid);
     if (remote) {
         const channelRef = await client.channels.fetch(remote.channelId).catch(()=>null);
@@ -637,7 +585,6 @@ client.on("interactionCreate", async (interaction) => {
     await interaction.reply({ content: "Updated setting.", ephemeral: true }).catch(()=>{});
 });
 
-// -------------------- Ready --------------------
 client.on("ready", () => {
     client.user.setPresence({
         activities: [{ name: "Shelp | Sremote" }],
@@ -645,5 +592,4 @@ client.on("ready", () => {
     });
 });
 
-// -------------------- Start --------------------
 client.login(process.env.DISCORD_BOT_TOKEN);
